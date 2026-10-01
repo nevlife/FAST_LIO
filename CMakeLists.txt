@@ -60,6 +60,8 @@ find_package(visualization_msgs REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(flux_cpp REQUIRED)
+find_package(vnr_flux_adapters REQUIRED)
 
 set(dependencies
   rclcpp
@@ -72,6 +74,7 @@ set(dependencies
   visualization_msgs
   pcl_ros
   pcl_conversions
+  vnr_flux_adapters
 )
 
 # Thirdparty libraries
@@ -96,7 +99,7 @@ target_include_directories(fastlio_mapping PUBLIC
   $<INSTALL_INTERFACE:include>
   ${PCL_INCLUDE_DIRS}
 )
-target_link_libraries(fastlio_mapping ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} Eigen3::Eigen)
+target_link_libraries(fastlio_mapping ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} Eigen3::Eigen flux_cpp::flux_cpp)
 target_include_directories(fastlio_mapping PRIVATE ${PYTHON_INCLUDE_DIRS})
 
 list(APPEND EOL_LIST "foxy" "galactic" "eloquent" "dashing" "crystal")

@@ -58,6 +58,9 @@
 #include <std_srvs/srv/trigger.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+#include <flux/ros/executor.hpp>
+#include <flux/ros/subscription.hpp>
+#include <sensor_msgs/flux/point_cloud2_ros.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
 #include "preprocess.h"
 #include <ikd-Tree/ikd_Tree.h>
@@ -84,7 +87,7 @@ mutex mtx_buffer;
 condition_variable sig_buffer;
 
 string root_dir = ROOT_DIR;
-string map_file_path, lid_topic, imu_topic;
+string map_file_path, lid_topic, lid_transport, imu_topic;
 
 double res_mean_last = 0.05, total_residual = 0.0;
 double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
@@ -767,6 +770,7 @@ public:
         this->declare_parameter<int>("max_iteration", 4);
         this->declare_parameter<string>("map_file_path", "");
         this->declare_parameter<string>("common.lid_topic", "/livox/lidar");
+        this->declare_parameter<string>("common.lid_transport", "dds");
         this->declare_parameter<string>("common.imu_topic", "/livox/imu");
         this->declare_parameter<bool>("common.time_sync_en", false);
         this->declare_parameter<double>("common.time_offset_lidar_to_imu", 0.0);
@@ -803,6 +807,7 @@ public:
         this->get_parameter_or<int>("max_iteration", NUM_MAX_ITERATIONS, 4);
         this->get_parameter_or<string>("map_file_path", map_file_path, "");
         this->get_parameter_or<string>("common.lid_topic", lid_topic, "/livox/lidar");
+        this->get_parameter_or<string>("common.lid_transport", lid_transport, "dds");
         this->get_parameter_or<string>("common.imu_topic", imu_topic,"/livox/imu");
         this->get_parameter_or<bool>("common.time_sync_en", time_sync_en, false);
         this->get_parameter_or<double>("common.time_offset_lidar_to_imu", time_diff_lidar_to_imu, 0.0);
@@ -878,7 +883,20 @@ public:
             cout << "~~~~"<<ROOT_DIR<<" doesn't exist" << endl;
 
         /*** ROS subscribe initialization ***/
-        sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS(), standard_pcl_cbk);
+        if (lid_transport == "flux")
+        {
+            using FluxCloud = sensor_msgs::flux_msg::PointCloud2;
+            sub_pcl_flux_ = flux::ros::create_subscription(*this, lid_topic, FluxCloud::kFingerprint, flux::QoS(4),
+                [](const flux::FrameView & f) {
+                    auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
+                    sensor_msgs::flux_msg::frame_to_msg(FluxCloud::View(f), *msg);
+                    standard_pcl_cbk(std::move(msg));
+                });
+        }
+        else
+        {
+            sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS(), standard_pcl_cbk);
+        }
         sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, imu_cbk);
         pubLaserCloudFull_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
         pubLaserCloudFull_body_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 20);
@@ -906,6 +924,8 @@ public:
         fout_pre.close();
         fclose(fp);
     }
+
+    std::shared_ptr<flux::ros::Subscription> lidar_flux_subscription() { return sub_pcl_flux_; }
 
 private:
     void timer_callback()
@@ -1090,6 +1110,7 @@ private:
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_pc_;
+    std::shared_ptr<flux::ros::Subscription> sub_pcl_flux_;
 
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
@@ -1112,7 +1133,18 @@ int main(int argc, char** argv)
 
     signal(SIGINT, SigHandle);
 
-    rclcpp::spin(std::make_shared<LaserMappingNode>());
+    auto node = std::make_shared<LaserMappingNode>();
+    if (auto lidar_sub = node->lidar_flux_subscription())
+    {
+        flux::ros::Executor ex;
+        ex.add(*lidar_sub);
+        ex.add_ros_node(node);
+        ex.spin();
+    }
+    else
+    {
+        rclcpp::spin(node);
+    }
 
     if (rclcpp::ok())
         rclcpp::shutdown();
