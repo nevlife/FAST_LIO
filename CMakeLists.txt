@@ -61,7 +61,7 @@ find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(flux_cpp REQUIRED)
-find_package(vnr_flux_adapters REQUIRED)
+find_package(flux_std_adapters REQUIRED)
 
 set(dependencies
   rclcpp
@@ -74,7 +74,7 @@ set(dependencies
   visualization_msgs
   pcl_ros
   pcl_conversions
-  vnr_flux_adapters
+  flux_std_adapters
 )
 
 # Thirdparty libraries
