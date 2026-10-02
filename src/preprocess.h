@@ -109,6 +109,32 @@ POINT_CLOUD_REGISTER_POINT_STRUCT(ouster_ros::Point,
     (std::uint32_t, range, range)
 )
 
+// Velodyne points read in place from a PointCloud2-layout buffer (x, y, z, intensity, time as
+// float32, ring as uint16), shaped like pcl::PointCloud so velodyne_handler reads either.
+struct RawVelodyneCloud
+{
+  struct Points
+  {
+    const uint8_t *data;
+    size_t count;
+    uint32_t step, x, y, z, intensity, time, ring;
+
+    size_t size() const { return count; }
+    velodyne_ros::Point operator[](size_t i) const
+    {
+      const uint8_t *p = data + i * step;
+      velodyne_ros::Point pt;
+      std::memcpy(&pt.x, p + x, sizeof(float));
+      std::memcpy(&pt.y, p + y, sizeof(float));
+      std::memcpy(&pt.z, p + z, sizeof(float));
+      std::memcpy(&pt.intensity, p + intensity, sizeof(float));
+      std::memcpy(&pt.time, p + time, sizeof(float));
+      std::memcpy(&pt.ring, p + ring, sizeof(uint16_t));
+      return pt;
+    }
+  } points;
+};
+
 class Preprocess
 {
   public:
@@ -118,7 +144,7 @@ class Preprocess
   ~Preprocess();
   
   void process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, PointCloudXYZI::Ptr &pcl_out);
-  void process(const pcl::PointCloud<velodyne_ros::Point> &pl_orig, PointCloudXYZI::Ptr &pcl_out);
+  void process(const RawVelodyneCloud &pl_orig, PointCloudXYZI::Ptr &pcl_out);
   void set(bool feat_en, int lid_type, double bld, int pfilt_num);
 
   // sensor_msgs::PointCloud2::ConstPtr pointcloud;
@@ -134,7 +160,7 @@ class Preprocess
 private:
   void oust64_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
   void velodyne_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
-  void velodyne_handler(const pcl::PointCloud<velodyne_ros::Point> &pl_orig);
+  template <typename Cloud> void velodyne_handler(const Cloud &pl_orig);
   void update_time_unit_scale();
   void default_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg);
   void give_feature(PointCloudXYZI &pl, vector<orgtype> &types);

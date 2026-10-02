@@ -65,7 +65,7 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, Po
   *pcl_out = pl_surf;
 }
 
-void Preprocess::process(const pcl::PointCloud<velodyne_ros::Point> &pl_orig, PointCloudXYZI::Ptr& pcl_out)
+void Preprocess::process(const RawVelodyneCloud &pl_orig, PointCloudXYZI::Ptr& pcl_out)
 {
   update_time_unit_scale();
   velodyne_handler(pl_orig);
@@ -201,7 +201,8 @@ void Preprocess::velodyne_handler(const sensor_msgs::msg::PointCloud2::UniquePtr
   velodyne_handler(pl_orig);
 }
 
-void Preprocess::velodyne_handler(const pcl::PointCloud<velodyne_ros::Point> &pl_orig)
+template <typename Cloud>
+void Preprocess::velodyne_handler(const Cloud &pl_orig)
 {
   pl_surf.clear();
   pl_corn.clear();

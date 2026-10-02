@@ -313,29 +313,21 @@ void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg)
     buffer_scan(get_time_sec(msg->header.stamp), [&](PointCloudXYZI::Ptr & ptr) { p_pre->process(msg, ptr); });
 }
 
-// Reads velodyne points straight from the shared-memory frame, without a PointCloud2 copy.
+// Reads velodyne points in place from the shared-memory frame: no PointCloud2 or pcl copy.
 void flux_velodyne_pcl_cbk(const sensor_msgs::flux_msg::PointCloud2::View & cloud)
 {
-    pcl::PCLPointCloud2 layout;
-    layout.height = cloud.height();
-    layout.width = cloud.width();
-    layout.point_step = cloud.point_step();
-    layout.row_step = cloud.row_step();
-    layout.is_dense = cloud.is_dense();
+    RawVelodyneCloud pl_orig;
+    pl_orig.points.data = cloud.data().data();
+    pl_orig.points.count = std::size_t(cloud.width()) * cloud.height();
+    pl_orig.points.step = cloud.point_step();
+    const std::map<std::string_view, uint32_t *> offsets = {
+        {"x", &pl_orig.points.x}, {"y", &pl_orig.points.y}, {"z", &pl_orig.points.z},
+        {"intensity", &pl_orig.points.intensity}, {"time", &pl_orig.points.time}, {"ring", &pl_orig.points.ring}};
     for (std::size_t i = 0; i < cloud.fields__size(); ++i)
     {
         const auto field = cloud.fields(i);
-        pcl::PCLPointField pcl_field;
-        pcl_field.name = field.name();
-        pcl_field.offset = field.offset();
-        pcl_field.datatype = field.datatype();
-        pcl_field.count = field.count();
-        layout.fields.push_back(pcl_field);
+        if (auto it = offsets.find(field.name()); it != offsets.end()) *it->second = field.offset();
     }
-    pcl::MsgFieldMap field_map;
-    pcl::createMapping<velodyne_ros::Point>(layout.fields, field_map);
-    pcl::PointCloud<velodyne_ros::Point> pl_orig;
-    pcl::fromPCLPointCloud2(layout, pl_orig, field_map, cloud.data().data());
     buffer_scan(cloud.header__sec() + cloud.header__nanosec() * 1e-9,
                 [&](PointCloudXYZI::Ptr & ptr) { p_pre->process(pl_orig, ptr); });
 }
