@@ -60,7 +60,7 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <flux/ros/executor.hpp>
 #include <flux/ros/subscription.hpp>
-#include <sensor_msgs/flux/point_cloud2_ros.hpp>
+#include <sensor_msgs/flux/point_cloud2.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
 #include "preprocess.h"
 #include <ikd-Tree/ikd_Tree.h>
@@ -282,11 +282,11 @@ void lasermap_fov_segment()
     kdtree_delete_time = omp_get_wtime() - delete_begin;
 }
 
-void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg) 
+template <typename PreprocessFn>
+void buffer_scan(double cur_time, PreprocessFn preprocess)
 {
     mtx_buffer.lock();
     scan_count ++;
-    double cur_time = get_time_sec(msg->header.stamp);
     double preprocess_start_time = omp_get_wtime();
     if (!is_first_lidar && cur_time < last_timestamp_lidar)
     {
@@ -299,13 +299,45 @@ void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg)
     }
 
     PointCloudXYZI::Ptr  ptr(new PointCloudXYZI());
-    p_pre->process(msg, ptr);
+    preprocess(ptr);
     lidar_buffer.push_back(ptr);
     time_buffer.push_back(cur_time);
     last_timestamp_lidar = cur_time;
     s_plot11[scan_count] = omp_get_wtime() - preprocess_start_time;
     mtx_buffer.unlock();
     sig_buffer.notify_all();
+}
+
+void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg) 
+{
+    buffer_scan(get_time_sec(msg->header.stamp), [&](PointCloudXYZI::Ptr & ptr) { p_pre->process(msg, ptr); });
+}
+
+// Reads velodyne points straight from the shared-memory frame, without a PointCloud2 copy.
+void flux_velodyne_pcl_cbk(const sensor_msgs::flux_msg::PointCloud2::View & cloud)
+{
+    pcl::PCLPointCloud2 layout;
+    layout.height = cloud.height();
+    layout.width = cloud.width();
+    layout.point_step = cloud.point_step();
+    layout.row_step = cloud.row_step();
+    layout.is_dense = cloud.is_dense();
+    for (std::size_t i = 0; i < cloud.fields__size(); ++i)
+    {
+        const auto field = cloud.fields(i);
+        pcl::PCLPointField pcl_field;
+        pcl_field.name = field.name();
+        pcl_field.offset = field.offset();
+        pcl_field.datatype = field.datatype();
+        pcl_field.count = field.count();
+        layout.fields.push_back(pcl_field);
+    }
+    pcl::MsgFieldMap field_map;
+    pcl::createMapping<velodyne_ros::Point>(layout.fields, field_map);
+    pcl::PointCloud<velodyne_ros::Point> pl_orig;
+    pcl::fromPCLPointCloud2(layout, pl_orig, field_map, cloud.data().data());
+    buffer_scan(cloud.header__sec() + cloud.header__nanosec() * 1e-9,
+                [&](PointCloudXYZI::Ptr & ptr) { p_pre->process(pl_orig, ptr); });
 }
 
 double timediff_lidar_wrt_imu = 0.0;
@@ -887,11 +919,7 @@ public:
         {
             using FluxCloud = sensor_msgs::flux_msg::PointCloud2;
             sub_pcl_flux_ = flux::ros::create_subscription(*this, lid_topic, FluxCloud::kFingerprint, flux::QoS(4),
-                [](const flux::FrameView & f) {
-                    auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
-                    sensor_msgs::flux_msg::frame_to_msg(FluxCloud::View(f), *msg);
-                    standard_pcl_cbk(std::move(msg));
-                });
+                [](const flux::FrameView & f) { flux_velodyne_pcl_cbk(FluxCloud::View(f)); });
         }
         else
         {

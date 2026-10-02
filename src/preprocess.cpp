@@ -46,6 +46,34 @@ void Preprocess::set(bool feat_en, int lid_type, double bld, int pfilt_num)
 
 void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, PointCloudXYZI::Ptr& pcl_out)
 {
+  update_time_unit_scale();
+
+  switch (lidar_type)
+  {
+    case OUST64:
+      oust64_handler(msg);
+      break;
+
+    case VELO16:
+      velodyne_handler(msg);
+      break;
+
+    default:
+      default_handler(msg);
+      break;
+  }
+  *pcl_out = pl_surf;
+}
+
+void Preprocess::process(const pcl::PointCloud<velodyne_ros::Point> &pl_orig, PointCloudXYZI::Ptr& pcl_out)
+{
+  update_time_unit_scale();
+  velodyne_handler(pl_orig);
+  *pcl_out = pl_surf;
+}
+
+void Preprocess::update_time_unit_scale()
+{
   switch (time_unit)
   {
     case SEC:
@@ -64,22 +92,6 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, Po
       time_unit_scale = 1.f;
       break;
   }
-
-  switch (lidar_type)
-  {
-    case OUST64:
-      oust64_handler(msg);
-      break;
-
-    case VELO16:
-      velodyne_handler(msg);
-      break;
-
-    default:
-      default_handler(msg);
-      break;
-  }
-  *pcl_out = pl_surf;
 }
 
 void Preprocess::oust64_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg)
@@ -184,12 +196,17 @@ void Preprocess::oust64_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &
 
 void Preprocess::velodyne_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg)
 {
+  pcl::PointCloud<velodyne_ros::Point> pl_orig;
+  pcl::fromROSMsg(*msg, pl_orig);
+  velodyne_handler(pl_orig);
+}
+
+void Preprocess::velodyne_handler(const pcl::PointCloud<velodyne_ros::Point> &pl_orig)
+{
   pl_surf.clear();
   pl_corn.clear();
   pl_full.clear();
 
-  pcl::PointCloud<velodyne_ros::Point> pl_orig;
-  pcl::fromROSMsg(*msg, pl_orig);
   int plsize = pl_orig.points.size();
   if (plsize == 0)
     return;
