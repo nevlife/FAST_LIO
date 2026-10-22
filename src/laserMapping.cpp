@@ -58,8 +58,8 @@
 #include <std_srvs/srv/trigger.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
-#include <flux/ros/executor.hpp>
-#include <flux/ros/subscription.hpp>
+#include <flux/executor.hpp>
+#include <flux/subscription.hpp>
 #include <sensor_msgs/flux/point_cloud2.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
 #include "preprocess.h"
@@ -910,7 +910,7 @@ public:
         if (lid_transport == "flux")
         {
             using FluxCloud = sensor_msgs::flux_msg::PointCloud2;
-            sub_pcl_flux_ = flux::ros::create_subscription(*this, lid_topic, FluxCloud::kFingerprint, flux::QoS(4),
+            sub_pcl_flux_ = std::make_shared<flux::Subscription>(*this, lid_topic, FluxCloud::kFingerprint, flux::QoS(4),
                 [](const flux::FrameView & f) { flux_velodyne_pcl_cbk(FluxCloud::View(f)); });
         }
         else
@@ -945,7 +945,7 @@ public:
         fclose(fp);
     }
 
-    std::shared_ptr<flux::ros::Subscription> lidar_flux_subscription() { return sub_pcl_flux_; }
+    std::shared_ptr<flux::Subscription> lidar_flux_subscription() { return sub_pcl_flux_; }
 
 private:
     void timer_callback()
@@ -1130,7 +1130,7 @@ private:
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_pc_;
-    std::shared_ptr<flux::ros::Subscription> sub_pcl_flux_;
+    std::shared_ptr<flux::Subscription> sub_pcl_flux_;
 
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
@@ -1156,9 +1156,9 @@ int main(int argc, char** argv)
     auto node = std::make_shared<LaserMappingNode>();
     if (auto lidar_sub = node->lidar_flux_subscription())
     {
-        flux::ros::Executor ex;
+        flux::Executor ex;
         ex.add(*lidar_sub);
-        ex.add_ros_node(node);
+        ex.add_node(node);
         ex.spin();
     }
     else
